@@ -102,6 +102,8 @@
 #include "sql/engine/expand/ob_expand_vec_op.h"
 #include "sql/optimizer/ob_log_values_table_access.h"
 #include "sql/engine/basic/ob_values_table_access_op.h"
+#include "sql/optimizer/ob_log_file_table_access.h"
+#include "sql/engine/basic/ob_file_table_access_op.h"
 
 namespace oceanbase
 {
@@ -1679,6 +1681,109 @@ int ObStaticEngineCG::generate_spec(ObLogExprValues &op,
     }
   }
 
+  return ret;
+}
+
+namespace
+{
+/**
+ * @brief Copy a string into the allocator of the physical plan.
+ */
+int copy_file_table_string(common::ObIAllocator &allocator,
+                           const common::ObString &source,
+                           common::ObString &target)
+{
+  int ret = OB_SUCCESS;
+  if (source.empty()) {
+    target = common::ObString();
+  } else {
+    char *buffer = NULL;
+    if (OB_ISNULL(buffer = static_cast<char *>(allocator.alloc(source.length() + 1)))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else {
+      MEMCPY(buffer, source.ptr(), source.length());
+      buffer[source.length()] = '\0';
+      target.assign(source.length(), buffer);
+    }
+  }
+  return ret;
+}
+} // namespace
+
+int ObStaticEngineCG::generate_spec(ObLogFileTableAccess &op,
+                                     ObFileTableAccessSpec &spec,
+                                     const bool in_root_job)
+{
+  int ret = OB_SUCCESS;
+  UNUSED(in_root_job);
+  const ObFileTableDef *table_def = op.get_file_table_def();
+  const int64_t column_count = op.get_column_exprs().count();
+  ObIAllocator &allocator = phy_plan_->get_allocator();
+  if (OB_ISNULL(table_def) || OB_UNLIKELY(op.get_output_exprs().empty())
+      || OB_UNLIKELY(column_count != table_def->columns_.count())) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(spec.column_exprs_.prepare_allocate(column_count))
+             || OB_FAIL(spec.column_types_.prepare_allocate(column_count))
+             || OB_FAIL(spec.column_names_.prepare_allocate(column_count))) {
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < column_count; ++i) {
+      ObColumnRefRawExpr *col_expr = op.get_column_exprs().at(i);
+      ObExpr *expr = NULL;
+      const ObFileTableDef::Column &column = table_def->columns_.at(i);
+      char *name_buf = NULL;
+      if (OB_ISNULL(col_expr)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_FAIL(mark_expr_self_produced(col_expr))) {
+      } else if (OB_FAIL(generate_rt_expr(*col_expr, expr))) {
+      } else if (OB_ISNULL(expr)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else if (OB_ISNULL(name_buf = static_cast<char *>(allocator.alloc(column.name_.length() + 1)))) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else {
+        if (column.name_.length() > 0) {
+          MEMCPY(name_buf, column.name_.ptr(), column.name_.length());
+        }
+        name_buf[column.name_.length()] = '\0';
+        spec.column_exprs_.at(i) = expr;
+        spec.column_types_.at(i) = column.type_;
+        spec.column_names_.at(i).assign(column.name_.length(), name_buf);
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (OB_FAIL(copy_file_table_string(allocator, table_def->path_, spec.path_))) {
+      } else if (OB_FAIL(copy_file_table_string(allocator, table_def->null_str_, spec.null_str_))) {
+      } else if (OB_FAIL(copy_file_table_string(allocator, table_def->delimiter_, spec.delimiter_))) {
+      } else if (OB_FAIL(copy_file_table_string(allocator, table_def->quote_, spec.quote_))) {
+      } else if (OB_FAIL(copy_file_table_string(allocator, table_def->escape_, spec.escape_))) {
+      } else {
+        spec.format_ = table_def->format_;
+        spec.header_ = table_def->header_;
+      }
+    }
+    if (OB_SUCC(ret) && ObFileScanFormat::GLOB == table_def->format_) {
+      const int64_t file_count = table_def->files_.count();
+      if (OB_FAIL(spec.file_list_.prepare_allocate(file_count))) {
+      } else {
+        for (int64_t i = 0; OB_SUCC(ret) && i < file_count; ++i) {
+          char *file_buf = NULL;
+          const common::ObString &file = table_def->files_.at(i);
+          if (OB_ISNULL(file_buf = static_cast<char *>(allocator.alloc(file.length() + 1)))) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          } else {
+            if (file.length() > 0) {
+              MEMCPY(file_buf, file.ptr(), file.length());
+            }
+            file_buf[file.length()] = '\0';
+            spec.file_list_.at(i).assign(file.length(), file_buf);
+          }
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs()))) {
+      }
+    }
+  }
   return ret;
 }
 
@@ -6149,6 +6254,10 @@ int ObStaticEngineCG::get_phy_op_type(ObLogicalOperator &log_op,
     }
     case log_op_def::LOG_VALUES_TABLE_ACCESS: {
       type = PHY_VALUES_TABLE_ACCESS;
+      break;
+    }
+    case log_op_def::LOG_FILE_TABLE_ACCESS: {
+      type = PHY_FILE_TABLE_ACCESS;
       break;
     }
     case log_op_def::LOG_EXPAND: {

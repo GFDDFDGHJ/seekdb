@@ -129,6 +129,42 @@ struct ObValuesTableDef {
                        K(access_type_), K(is_const_), K(column_types_));
 };
 
+/**
+ * @brief The definition of a table that is read from a local file.
+ *
+ * The columns of the table are discovered when the statement is resolved, the
+ * file is inspected at that moment and the discovered schema is stored here.
+ */
+struct ObFileTableDef
+{
+  struct Column
+  {
+    common::ObString name_;
+    int32_t type_;     // the ObFileScanType of the column
+    bool nullable_;
+    Column() : name_(), type_(0), nullable_(false) {}
+  };
+
+  ObFileTableDef()
+      : path_(), null_str_(), delimiter_(), quote_(), escape_(), format_(0), header_(true),
+        sample_size_(-1), columns_(), files_(), row_count_(0)
+  {}
+
+  common::ObString path_;
+  common::ObString null_str_;
+  common::ObString delimiter_;
+  common::ObString quote_;
+  common::ObString escape_;
+  int32_t format_;      // the ObFileScanFormat of the file
+  bool header_;         // the first record of a csv file holds the column names
+  int64_t sample_size_; // only -1, the whole file is inspected
+  common::ObArray<Column, common::ModulePageAllocator, true> columns_;
+  // the files that were found by the glob function
+  common::ObArray<common::ObString, common::ModulePageAllocator, true> files_;
+  int64_t row_count_;
+  virtual TO_STRING_KV(K_(path), K_(format), K_(header), K_(sample_size), K_(row_count));
+};
+
 struct TableItem
 {
   TableItem()
@@ -155,6 +191,7 @@ struct TableItem
     json_table_def_ = nullptr;
     table_type_ = MAX_TABLE_TYPE;
     values_table_def_ = NULL;
+    file_table_def_ = NULL;
     sample_info_ = nullptr;
   }
 
@@ -190,6 +227,7 @@ struct TableItem
     JSON_TABLE,
     VALUES_TABLE,
     LATERAL_TABLE,
+    FILE_TABLE,
   };
 
   /**
@@ -226,6 +264,7 @@ struct TableItem
   bool is_values_table() const { return VALUES_TABLE == type_; }//used to mark values statement: values row(1,2), row(3,4);
 
   bool is_lateral_table() const { return LATERAL_TABLE == type_; }
+  bool is_file_table() const { return FILE_TABLE == type_; } // a table that is read from a local file
   bool is_extended_all_or_user_sys_view() const
   {
     return (is_extended_sys_view_table(ref_id_) && (table_name_.prefix_match("USER_") || table_name_.prefix_match("ALL_")));
@@ -303,6 +342,8 @@ struct TableItem
   ObJsonTableDef *json_table_def_;
   // values table
   ObValuesTableDef *values_table_def_;
+  // file table
+  ObFileTableDef *file_table_def_;
   // sample scan infos
   SampleInfo *sample_info_;
 };

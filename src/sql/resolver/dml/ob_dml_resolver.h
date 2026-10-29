@@ -18,6 +18,7 @@
 #define OCEANBASE_SQL_RESOLVER_DML_OB_DML_RESOLVER_H_
 #include "sql/resolver/dml/ob_dml_stmt.h"
 #include "sql/resolver/dml/ob_column_namespace_checker.h"
+#include "sql/engine/basic/ob_file_scan_utils.h"
 #include "sql/resolver/ob_stmt_resolver.h"
 #include "sql/resolver/expr/ob_raw_expr_resolver_impl.h"
 #include "sql/resolver/expr/ob_raw_expr_util.h"
@@ -211,6 +212,40 @@ public:
   int create_unnest_table_item(TableItem *&table_item, ObString table_name);
   int unnest_table_add_column(TableItem *&table_item, ColumnItem *&col_item, ObString col_name);
   int resolve_hybrid_search_item(const ParseNode &parse_tree, TableItem *&table_item);
+  // the file table functions read a local file and expose it as a table
+  int resolve_file_table_item(const ParseNode &table_node, TableItem *&table_item);
+  int resolve_file_table_args(const ParseNode *args_node,
+                              const common::ObString &func_name,
+                              ObFileScanOptions &options);
+  int extract_file_table_option_name(const ParseNode *node, common::ObString &name);
+  int apply_file_table_option(const common::ObString &option_name,
+                              const ParseNode *value_node,
+                              ObFileScanOptions &options);
+  int extract_file_table_string(const ParseNode *node, common::ObString &value);
+  int extract_file_table_bool(const ParseNode *node, bool &value);
+  int extract_file_table_int(const ParseNode *node, int64_t &value);
+  int resolve_file_table_def(ObFileTableDef &table_def, const ObFileScanOptions &options);
+  int resolve_file_table_glob(ObFileTableDef &table_def, const ObFileScanOptions &options);
+  int resolve_file_table_file(ObFileTableDef &table_def, const ObFileScanOptions &options);
+  int check_file_table_path(const common::ObString &path);
+  int resolve_file_table_real_path(const common::ObString &path, common::ObString &real_path);
+  int infer_file_table_csv(ObFileTableDef &table_def,
+                           const ObFileScanOptions &options,
+                           const common::ObString &path);
+  int infer_file_table_json(ObFileTableDef &table_def,
+                            const ObFileScanOptions &options,
+                            const common::ObString &path);
+  int infer_file_table_parquet(ObFileTableDef &table_def,
+                               const ObFileScanOptions &options,
+                               const common::ObString &path);
+  int build_file_table_columns(ObFileTableDef &table_def,
+                               const std::vector<common::ObString> &names,
+                               const std::vector<ObFileScanColumn> &columns);
+  int build_file_table_column_name(const std::vector<common::ObString> &names,
+                                    int64_t index,
+                                    common::ObString &name);
+  int dup_file_table_string(const common::ObString &source, common::ObString &target);
+  int gen_file_table_column_items(TableItem &table_item);
 
   int fill_same_column_to_using(JoinedTable* &joined_table);
   int get_columns_from_table_item(const TableItem *table_item, common::ObIArray<common::ObString> &column_names);
