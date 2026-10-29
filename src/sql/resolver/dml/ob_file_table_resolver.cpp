@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#define USING_LOG_PREFIX SQL_RESOLVER
+#define USING_LOG_PREFIX SQL_RESV
 
 #include "sql/resolver/dml/ob_dml_resolver.h"
 #include "sql/engine/basic/ob_file_parquet_reader.h"
@@ -74,8 +74,9 @@ int expand_glob(const common::ObString &pattern, std::vector<common::ObString> &
     ret = OB_INVALID_ARGUMENT;
   } else {
 #ifdef _WIN32
+    common::ObMalloc allocator;
     char *path = NULL;
-    if (OB_ISNULL(path = static_cast<char *>(ObMalloc(MAX_PATH_LENGTH)))) {
+    if (OB_ISNULL(path = static_cast<char *>(allocator.alloc(MAX_PATH_LENGTH)))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
       MEMCPY(path, pattern.ptr(), pattern.length());
@@ -86,20 +87,19 @@ int expand_glob(const common::ObString &pattern, std::vector<common::ObString> &
         do {
           if (0 == (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
             common::ObString file(find_data.cFileName);
-            if (OB_FAIL(files.push_back(file))) {
-              break;
-            }
+            files.push_back(file);
           }
         } while (FindNextFileA(handle, &find_data));
         FindClose(handle);
       }
-      ObFree(path);
+      allocator.free(path);
     }
 #else
     glob_t glob_result;
     MEMSET(&glob_result, 0, sizeof(glob_result));
+    common::ObMalloc allocator;
     char *c_pattern = NULL;
-    if (OB_ISNULL(c_pattern = static_cast<char *>(ObMalloc(pattern.length() + 1)))) {
+    if (OB_ISNULL(c_pattern = static_cast<char *>(allocator.alloc(pattern.length() + 1)))) {
       ret = OB_ALLOCATE_MEMORY_FAILED;
     } else {
       MEMCPY(c_pattern, pattern.ptr(), pattern.length());
@@ -113,13 +113,11 @@ int expand_glob(const common::ObString &pattern, std::vector<common::ObString> &
       } else {
         for (size_t i = 0; OB_SUCC(ret) && i < glob_result.gl_pathc; ++i) {
           common::ObString file(glob_result.gl_pathv[i]);
-          if (OB_FAIL(files.push_back(file))) {
-            break;
-          }
+          files.push_back(file);
         }
       }
       globfree(&glob_result);
-      ObFree(c_pattern);
+      allocator.free(c_pattern);
     }
 #endif
   }
@@ -222,11 +220,11 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &table_node, TableIte
     if (OB_ISNULL(func_name_node)) {
       ret = OB_ERR_UNEXPECTED;
     } else {
-      func_name.assign(func_name_node->str_value_, func_name_node->str_len_);
+      func_name.assign(const_cast<char *>(func_name_node->str_value_), func_name_node->str_len_);
     }
   }
   if (OB_SUCC(ret) && !OB_ISNULL(alias_node)) {
-    alias_name.assign(alias_node->str_value_, alias_node->str_len_);
+    alias_name.assign(const_cast<char *>(alias_node->str_value_), alias_node->str_len_);
   }
   if (OB_SUCC(ret)) {
     ret = resolve_file_table_args(args_node, func_name, options);
@@ -350,7 +348,7 @@ int ObDMLResolver::extract_file_table_option_name(const ParseNode *node, common:
     ret = OB_ERR_UNEXPECTED;
   } else if (T_COLUMN_REF == node->type_ && 3 == node->num_child_ && OB_ISNULL(node->children_[0])
              && OB_ISNULL(node->children_[1]) && !OB_ISNULL(node->children_[2])) {
-    name.assign(node->children_[2]->str_value_, node->children_[2]->str_len_);
+    name.assign(const_cast<char *>(node->children_[2]->str_value_), node->children_[2]->str_len_);
   } else {
     ret = OB_ERR_PARSE_SQL;
     LOG_USER_ERROR(OB_ERR_PARSE_SQL,
@@ -419,7 +417,7 @@ int ObDMLResolver::extract_file_table_string(const ParseNode *node, common::ObSt
     ret = OB_ERR_PARSE_SQL;
     LOG_USER_ERROR(OB_ERR_PARSE_SQL, ob_errpkt_strerror(OB_ERR_PARSER_SYNTAX), 0, "", 1);
   } else {
-    value.assign(node->str_value_, node->str_len_);
+    value.assign(const_cast<char *>(node->str_value_), node->str_len_);
   }
   return ret;
 }
@@ -492,7 +490,8 @@ int ObDMLResolver::resolve_file_table_glob(ObFileTableDef &table_def, const ObFi
   } else if (OB_FAIL(check_file_table_path(options.path_))) {
     ret = OB_FILE_NOT_EXIST;
   } else {
-    ret = files.push_back(options.path_);
+    files.push_back(options.path_);
+    ret = OB_SUCCESS;
   }
   for (int64_t i = 0; OB_SUCC(ret) && i < static_cast<int64_t>(files.size()); ++i) {
     if (OB_FAIL(check_file_table_path(files[i]))) {
@@ -629,7 +628,7 @@ int ObDMLResolver::resolve_file_table_real_path(const common::ObString &path, co
       ret = OB_FILE_NOT_EXIST;
       LOG_USER_ERROR(OB_FILE_NOT_EXIST, path.ptr());
     } else {
-      real_path.assign(actual_path);
+      real_path.assign(actual_path, static_cast<int64_t>(strlen(actual_path)));
     }
   }
   return ret;
@@ -660,9 +659,7 @@ int ObDMLResolver::infer_file_table_csv(ObFileTableDef &table_def,
         if (OB_FAIL(name.append_fmt("column%ld", i))) {
           break;
         }
-        if (OB_FAIL(names.push_back(common::ObString(name.ptr(), name.length())))) {
-          break;
-        }
+        names.push_back(common::ObString(name.length(), name.ptr()));
       }
     }
     if (OB_SUCC(ret)) {
@@ -730,7 +727,8 @@ int ObDMLResolver::infer_file_table_parquet(ObFileTableDef &table_def,
       const std::vector<ObParquetColumnMeta> &columns = reader.get_columns();
       for (size_t i = 0; OB_SUCC(ret) && i < columns.size(); ++i) {
         ObFileTableDef::Column column;
-        column.name_.assign(columns[i].name_.data(), columns[i].name_.length());
+        column.name_.assign(const_cast<char *>(columns[i].name_.data()),
+                            static_cast<int64_t>(columns[i].name_.length()));
         column.type_ = static_cast<int32_t>(parquet_type_to_scan_type(columns[i].type_));
         column.nullable_ = (ObParquetRepetition::OPTIONAL == columns[i].repetition_type_);
         if (OB_FAIL(table_def.columns_.push_back(column))) {
@@ -789,7 +787,7 @@ int ObDMLResolver::build_file_table_column_name(const std::vector<common::ObStri
       common::ObSqlString new_name;
       if (OB_FAIL(new_name.append_fmt("%.*s__%ld", origin_name.length(), origin_name.ptr(), duplicated + 1))) {
       } else {
-        ret = dup_file_table_string(common::ObString(new_name.ptr(), new_name.length()), name);
+        ret = dup_file_table_string(common::ObString(new_name.length(), new_name.ptr()), name);
       }
     }
   }
@@ -814,7 +812,7 @@ int ObDMLResolver::dup_file_table_string(const common::ObString &source, common:
     } else {
       MEMCPY(buffer, source.ptr(), source.length());
       buffer[source.length()] = '\0';
-      target.assign(source.length(), buffer);
+      target.assign(buffer, source.length());
     }
   }
   return ret;
@@ -836,13 +834,13 @@ int ObDMLResolver::gen_file_table_column_items(TableItem &table_item)
       const ObFileScanType scan_type = static_cast<ObFileScanType>(column.type_);
       ObColumnRefRawExpr *column_expr = NULL;
       ObRawExprResType result_type;
-      result_type.set_meta(scan_type_to_obj_type(scan_type));
+      result_type.set_type(scan_type_to_obj_type(scan_type));
       common::ObAccuracy accuracy;
-      if (common::ObVarcharType == result_type.get_meta()) {
+      if (common::ObVarcharType == result_type.get_type()) {
         accuracy.set_precision(FILE_TABLE_VARCHAR_LENGTH);
         accuracy.set_scale(0);
       } else {
-        accuracy = common::ObAccuracy::DDL_DEFAULT_ACCURACY[result_type.get_meta()];
+        accuracy = common::ObAccuracy::DDL_DEFAULT_ACCURACY[result_type.get_type()];
       }
       result_type.set_accuracy(accuracy);
       if (OB_FAIL(params_.expr_factory_->create_raw_expr(T_REF_COLUMN, column_expr))) {

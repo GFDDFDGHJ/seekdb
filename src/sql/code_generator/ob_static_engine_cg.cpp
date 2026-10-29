@@ -1703,7 +1703,7 @@ int copy_file_table_string(common::ObIAllocator &allocator,
     } else {
       MEMCPY(buffer, source.ptr(), source.length());
       buffer[source.length()] = '\0';
-      target.assign(source.length(), buffer);
+      target.assign(buffer, source.length());
     }
   }
   return ret;
@@ -1727,7 +1727,7 @@ int ObStaticEngineCG::generate_spec(ObLogFileTableAccess &op,
              || OB_FAIL(spec.column_names_.prepare_allocate(column_count))) {
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < column_count; ++i) {
-      ObColumnRefRawExpr *col_expr = op.get_column_exprs().at(i);
+      ObColumnRefRawExpr *col_expr = static_cast<ObColumnRefRawExpr *>(op.get_column_exprs().at(i));
       ObExpr *expr = NULL;
       const ObFileTableDef::Column &column = table_def->columns_.at(i);
       char *name_buf = NULL;
@@ -1746,7 +1746,7 @@ int ObStaticEngineCG::generate_spec(ObLogFileTableAccess &op,
         name_buf[column.name_.length()] = '\0';
         spec.column_exprs_.at(i) = expr;
         spec.column_types_.at(i) = column.type_;
-        spec.column_names_.at(i).assign(column.name_.length(), name_buf);
+        spec.column_names_.at(i).assign(name_buf, column.name_.length());
       }
     }
     if (OB_SUCC(ret)) {
@@ -1760,7 +1760,7 @@ int ObStaticEngineCG::generate_spec(ObLogFileTableAccess &op,
         spec.header_ = table_def->header_;
       }
     }
-    if (OB_SUCC(ret) && ObFileScanFormat::GLOB == table_def->format_) {
+    if (OB_SUCC(ret) && static_cast<int32_t>(ObFileScanFormat::GLOB) == table_def->format_) {
       const int64_t file_count = table_def->files_.count();
       if (OB_FAIL(spec.file_list_.prepare_allocate(file_count))) {
       } else {
@@ -1774,7 +1774,7 @@ int ObStaticEngineCG::generate_spec(ObLogFileTableAccess &op,
               MEMCPY(file_buf, file.ptr(), file.length());
             }
             file_buf[file.length()] = '\0';
-            spec.file_list_.at(i).assign(file.length(), file_buf);
+            spec.file_list_.at(i).assign(file_buf, file.length());
           }
         }
       }

@@ -19,7 +19,7 @@
 #include "sql/engine/basic/ob_file_table_access_op.h"
 #include "sql/engine/ob_exec_context.h"
 #include "sql/engine/expr/ob_datum_cast.h"
-#include "lib/timezone/ob_time_convert.h"
+#include "common/timezone/ob_time_convert.h"
 
 namespace oceanbase
 {
@@ -29,8 +29,25 @@ namespace sql
 namespace
 {
 /// the size of the chunk that is read from a file
-const int64_t FILE_READ_CHUNK_SIZE = 16 * 1024;
+const int64_t FILE_TABLE_READ_CHUNK_SIZE = 16 * 1024;
 } // namespace
+
+// The unified serialization of the specification has to be defined, otherwise
+// the class keeps an undefined key function and its vtable never reaches the
+// binary.
+OB_SERIALIZE_MEMBER_INHERIT(ObFileTableAccessSpec,
+                            ObOpSpec,
+                            column_exprs_,
+                            column_types_,
+                            column_names_,
+                            path_,
+                            null_str_,
+                            delimiter_,
+                            quote_,
+                            escape_,
+                            format_,
+                            header_,
+                            file_list_);
 
 ObFileTableAccessOp::ObFileTableAccessOp(ObExecContext &exec_ctx, const ObOpSpec &spec, ObOpInput *input)
     : ObOperator(exec_ctx, spec, input),
@@ -51,15 +68,11 @@ ObFileTableAccessOp::~ObFileTableAccessOp() {}
 int ObFileTableAccessOp::on_row(const ObFileScanValue *values, int64_t count)
 {
   int ret = OB_SUCCESS;
-  for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
-    ret = pending_values_.push_back(values[i]);
+  for (int64_t i = 0; i < count; ++i) {
+    pending_values_.push_back(values[i]);
   }
-  if (OB_SUCC(ret)) {
-    ret = pending_row_ends_.push_back(static_cast<int64_t>(pending_values_.size()));
-  }
-  if (OB_SUCC(ret)) {
-    ++pending_row_count_;
-  }
+  pending_row_ends_.push_back(static_cast<int64_t>(pending_values_.size()));
+  ++pending_row_count_;
   return ret;
 }
 
@@ -290,7 +303,7 @@ int ObFileTableAccessOp::read_file_chunk(ObFileScanReader &reader)
   common::ObFileReader file_reader;
   char *buffer = NULL;
   if (OB_FAIL(build_scan_options(options))) {
-  } else if (OB_ISNULL(buffer = static_cast<char *>(allocator_->alloc(FILE_READ_CHUNK_SIZE)))) {
+  } else if (OB_ISNULL(buffer = static_cast<char *>(allocator_->alloc(FILE_TABLE_READ_CHUNK_SIZE)))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
   } else if (OB_FAIL(file_reader.open(options.path_, false))) {
     ret = OB_FILE_NOT_EXIST;
@@ -301,8 +314,8 @@ int ObFileTableAccessOp::read_file_chunk(ObFileScanReader &reader)
     bool is_end = false;
     while (OB_SUCC(ret) && !is_end) {
       int64_t read_size = 0;
-      const int64_t want = (file_size - offset) < FILE_READ_CHUNK_SIZE ? (file_size - offset)
-                                                                       : FILE_READ_CHUNK_SIZE;
+      const int64_t want = (file_size - offset) < FILE_TABLE_READ_CHUNK_SIZE ? (file_size - offset)
+                                                                       : FILE_TABLE_READ_CHUNK_SIZE;
       if (OB_FAIL(file_reader.pread(buffer, want, offset, read_size))) {
         ret = OB_IO_ERROR;
         break;
@@ -312,7 +325,7 @@ int ObFileTableAccessOp::read_file_chunk(ObFileScanReader &reader)
       }
       offset += read_size;
       is_end = (offset >= file_size);
-      if (OB_FAIL(reader.feed(buffer, read_size, is_end))) {
+      if (OB_FAIL(reader.feed(buffer, read_size, is_end, *this))) {
         break;
       }
       if (pending_row_count_ > 0) {

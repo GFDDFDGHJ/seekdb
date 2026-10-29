@@ -53,8 +53,8 @@ public:
   virtual int inner_replace_op_exprs(ObRawExprReplacer &replacer) override;
   virtual int get_plan_item_info(PlanText &plan_text, ObSqlPlanItem &plan_item) override;
 
-  const common::ObIArray<ObColumnRefRawExpr *> &get_column_exprs() const { return column_exprs_; }
-  common::ObIArray<ObColumnRefRawExpr *> &get_column_exprs() { return column_exprs_; }
+  const common::ObIArray<ObRawExpr *> &get_column_exprs() const { return column_exprs_; }
+  common::ObIArray<ObRawExpr *> &get_column_exprs() { return column_exprs_; }
   inline const ObFileTableDef *get_file_table_def() const { return table_def_; }
   inline void set_file_table_def(ObFileTableDef *table_def) { table_def_ = table_def; }
   inline common::ObString &get_table_name() { return table_name_; }
@@ -66,7 +66,7 @@ public:
   inline const FileTablePath *get_file_path() const { return file_path_; }
 
 private:
-  common::ObSEArray<ObColumnRefRawExpr *, 4, common::ModulePageAllocator, true> column_exprs_;
+  common::ObSEArray<ObRawExpr *, 4, common::ModulePageAllocator, true> column_exprs_;
   ObFileTableDef *table_def_;
   common::ObString table_name_;
   uint64_t table_id_;

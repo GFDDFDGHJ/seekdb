@@ -88,7 +88,7 @@ int ObLogFileTableAccess::allocate_expr_post(ObAllocExprContext &ctx)
 {
   int ret = OB_SUCCESS;
   for (int64_t i = 0; OB_SUCC(ret) && i < column_exprs_.count(); ++i) {
-    ObColumnRefRawExpr *value_col = column_exprs_.at(i);
+    ObColumnRefRawExpr *value_col = static_cast<ObColumnRefRawExpr *>(column_exprs_.at(i));
     if (OB_FAIL(mark_expr_produced(value_col, branch_id_, id_, ctx))) {
     } else if (!is_plan_root() && OB_FAIL(output_exprs_.push_back(value_col))) {
     } else { /* do nothing */ }

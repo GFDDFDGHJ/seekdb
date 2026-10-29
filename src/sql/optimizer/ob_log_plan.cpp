@@ -11828,9 +11828,14 @@ int ObLogPlan::do_alloc_file_table_path(FileTablePath *file_table_path,
     file_op->set_file_path(file_table_path);
     ObSEArray<ObColumnRefRawExpr *, 4> column_exprs;
     if (OB_FAIL(get_stmt()->get_column_exprs(file_table_path->table_id_, column_exprs))) {
-    } else if (OB_FAIL(file_op->get_column_exprs().assign(column_exprs))) {
-    } else if (OB_FAIL(append(file_op->get_filter_exprs(), file_table_path->filter_))) {
-    } else if (OB_FAIL(file_op->compute_property(file_table_path))) {
+    } else {
+      for (int64_t i = 0; OB_SUCC(ret) && i < column_exprs.count(); ++i) {
+        if (OB_FAIL(file_op->get_column_exprs().push_back(column_exprs.at(i)))) {
+        }
+      }
+      if (OB_SUCC(ret) && OB_FAIL(append(file_op->get_filter_exprs(), file_table_path->filter_))) {
+      } else if (OB_SUCC(ret) && OB_FAIL(file_op->compute_property(file_table_path))) {
+      }
     }
   }
   return ret;
