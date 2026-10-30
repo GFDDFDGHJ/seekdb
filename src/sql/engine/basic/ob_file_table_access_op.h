@@ -46,7 +46,10 @@ public:
         escape_(),
         format_(0),
         header_(true),
-        file_list_(alloc)
+        file_list_(alloc),
+        described_names_(alloc),
+        described_types_(alloc),
+        described_nullable_(alloc)
   {}
 
   INHERIT_TO_STRING_KV("op_spec", ObOpSpec, K_(format), K_(header));
@@ -65,6 +68,10 @@ public:
   bool header_;
   // the files that were found by the glob function
   common::ObFixedArray<common::ObString, common::ObIAllocator> file_list_;
+  // the columns of the file when the statement describes them
+  common::ObFixedArray<common::ObString, common::ObIAllocator> described_names_;
+  common::ObFixedArray<int32_t, common::ObIAllocator> described_types_;
+  common::ObFixedArray<int32_t, common::ObIAllocator> described_nullable_;
 
 private:
   DISALLOW_COPY_AND_ASSIGN(ObFileTableAccessSpec);
@@ -97,6 +104,7 @@ private:
   int read_next_record();
   int read_next_parquet_record();
   int read_next_glob_record();
+  int read_next_describe_record();
   int set_row_datum(int64_t index, const common::ObString &value, bool is_null);
   int set_row_datum(int64_t index, const ObParquetValue &value);
   int set_null_datum(int64_t index);
@@ -122,6 +130,8 @@ private:
   // the strings of the records that wait for the consumer
   std::vector<std::string> pending_strings_;
   std::vector<int64_t> pending_row_ends_;
+  // the row of the description that is produced next
+  int64_t describe_row_index_;
   int64_t pending_row_index_;
   int64_t pending_row_count_;
   // the values of the columns of the current row group of a parquet file

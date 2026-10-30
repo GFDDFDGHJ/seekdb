@@ -501,7 +501,7 @@ END_P SET_VAR DELIMITER
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
 %type <node> file_table_func_expr file_table_func_name file_table_func_args file_table_func_arg
-%type <node> copy_stmt copy_option_list copy_option copy_option_value
+%type <node> copy_stmt copy_option_list copy_option copy_option_value describe_stmt
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
 %type <node> table_values_clause table_values_clause_with_order_by_and_limit values_row_list row_value
@@ -561,6 +561,7 @@ opt_end_p:
 stmt:
     select_stmt             { $$ = $1; question_mark_issue($$, result); }
   | copy_stmt               { $$ = $1; question_mark_issue($$, result); }
+  | describe_stmt           { $$ = $1; question_mark_issue($$, result); }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
     $$ = $1;
@@ -12315,7 +12316,6 @@ explain_or_desc relation_factor opt_desc_column_option
 
 explain_or_desc:
 EXPLAIN {$$ = NULL;}
-| DESCRIBE {$$ = NULL;}
 | DESC  {$$ = NULL;}
 ;
 
@@ -16701,6 +16701,45 @@ file_table_func_arg:
 expr
 {
   $$ = $1;
+}
+;
+
+/*
+ * DESCRIBE ( query ) reports the columns of the file that a query reads. The
+ * query is rewritten into a query over the same file table function, the rows
+ * of the description are the columns of the file.
+ */
+describe_stmt:
+DESCRIBE select_stmt
+{
+  ParseNode *select_node = $2;
+  ParseNode *from_list = NULL;
+  ParseNode *from_node = NULL;
+  if (OB_UNLIKELY(NULL == select_node || T_SELECT != select_node->type_)) {
+    yyerror(&@1, result, "the DESCRIBE statement needs a query");
+    YYABORT_PARSE_SQL_ERROR;
+  } else if (OB_UNLIKELY(NULL == (from_list = select_node->children_[PARSE_SELECT_FROM])
+                         || T_FROM_LIST != from_list->type_
+                         || 1 != from_list->num_child_
+                         || NULL == (from_node = from_list->children_[0])
+                         || T_FILE_TABLE_EXPRESSION != from_node->type_)) {
+    yyerror(&@1, result, "the DESCRIBE statement needs a query over a file table function");
+    YYABORT_PARSE_SQL_ERROR;
+  } else {
+    ParseNode *star_node = NULL;
+    ParseNode *project_string = NULL;
+    ParseNode *project_list = NULL;
+    ParseNode *describe_select = NULL;
+    /* the marked node describes its file instead of reading it */
+    from_node->value_ = 1;
+    malloc_terminal_node(star_node, result->malloc_pool_, T_STAR);
+    malloc_non_terminal_node(project_string, result->malloc_pool_, T_PROJECT_STRING, 1, star_node);
+    merge_nodes(project_list, result, T_PROJECT_LIST, project_string);
+    malloc_select_node(describe_select, result->malloc_pool_);
+    describe_select->children_[PARSE_SELECT_SELECT] = project_list;
+    describe_select->children_[PARSE_SELECT_FROM] = from_list;
+    $$ = describe_select;
+  }
 }
 ;
 

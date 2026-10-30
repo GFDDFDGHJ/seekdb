@@ -37,7 +37,8 @@ enum class ObFileScanFormat
   CSV = 0,
   JSONL,
   PARQUET,
-  GLOB
+  GLOB,
+  DESCRIBE
 };
 
 /**
@@ -92,6 +93,8 @@ struct ObFileScanOptions
   common::ObString escape_;
   common::ObString json_format_;
   bool ignore_errors_;
+  /// the statement describes the columns of the file instead of reading it
+  bool is_describe_;
   int64_t max_field_size_;
   int64_t max_record_size_;
 
@@ -107,6 +110,7 @@ struct ObFileScanOptions
         escape_(),
         json_format_(),
         ignore_errors_(false),
+        is_describe_(false),
         max_field_size_(16 * 1024 * 1024),
         max_record_size_(64 * 1024 * 1024)
   {}

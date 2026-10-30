@@ -161,6 +161,9 @@ struct ObFileTableDef
   common::ObArray<Column, common::ModulePageAllocator, true> columns_;
   // the expressions of the columns, they are the output of the operator
   common::ObArray<ObRawExpr *, common::ModulePageAllocator, true> column_exprs_;
+  // the columns of the file when the statement describes them, the columns of
+  // the described table are the six columns of the description
+  common::ObArray<Column, common::ModulePageAllocator, true> described_columns_;
   // the files that were found by the glob function
   common::ObArray<common::ObString, common::ModulePageAllocator, true> files_;
   int64_t row_count_;

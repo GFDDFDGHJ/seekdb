@@ -221,6 +221,8 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &table_node, TableIte
       ret = OB_ERR_UNEXPECTED;
     } else {
       func_name.assign(const_cast<char *>(func_name_node->str_value_), func_name_node->str_len_);
+      // the rewrite of the DESCRIBE statement marks the node it describes
+      options.is_describe_ = (1 == table_node.value_);
     }
   }
   if (OB_SUCC(ret) && !OB_ISNULL(alias_node)) {
@@ -240,7 +242,10 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &table_node, TableIte
     }
   }
   if (OB_SUCC(ret)) {
-    ret = resolve_file_table_def(*new_table_item->file_table_def_, options);
+    if (OB_FAIL(resolve_file_table_def(*new_table_item->file_table_def_, options))) {
+    } else if (options.is_describe_) {
+      ret = build_file_table_describe_columns(*new_table_item->file_table_def_);
+    }
   }
   if (OB_SUCC(ret) && !OB_ISNULL(params_.query_ctx_)) {
     // the content of the file may change, the plan of the statement must not be cached
@@ -480,6 +485,39 @@ int ObDMLResolver::extract_file_table_int(const ParseNode *node, int64_t &value)
   } else {
     ret = OB_ERR_PARSE_SQL;
     LOG_USER_ERROR(OB_ERR_PARSE_SQL, ob_errpkt_strerror(OB_ERR_PARSER_SYNTAX), 0, "", 1);
+  }
+  return ret;
+}
+
+/**
+ * @brief Turn the columns of the file into the rows of a description.
+ *
+ * The description reports six columns for every column of the file, so the
+ * columns of the file are kept apart and the table gets the six columns of the
+ * description instead.
+ */
+int ObDMLResolver::build_file_table_describe_columns(ObFileTableDef &table_def)
+{
+  int ret = OB_SUCCESS;
+  static const char *const names[] = {"column_name", "column_type", "null", "key", "default", "extra"};
+  for (int64_t i = 0; OB_SUCC(ret) && i < table_def.columns_.count(); ++i) {
+    if (OB_FAIL(table_def.described_columns_.push_back(table_def.columns_.at(i)))) {
+    }
+  }
+  if (OB_SUCC(ret)) {
+    table_def.columns_.reuse();
+    for (int64_t i = 0; OB_SUCC(ret) && i < 6; ++i) {
+      ObFileTableDef::Column column;
+      column.name_ = common::ObString::make_string(names[i]);
+      column.type_ = static_cast<int32_t>(ObFileScanType::VARCHAR);
+      column.nullable_ = true;
+      if (OB_FAIL(table_def.columns_.push_back(column))) {
+      }
+    }
+  }
+  if (OB_SUCC(ret)) {
+    table_def.format_ = static_cast<int32_t>(ObFileScanFormat::DESCRIBE);
+    table_def.row_count_ = table_def.described_columns_.count();
   }
   return ret;
 }

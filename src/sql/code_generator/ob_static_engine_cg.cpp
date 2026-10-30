@@ -1779,6 +1779,23 @@ int ObStaticEngineCG::generate_spec(ObLogFileTableAccess &op,
         }
       }
     }
+    if (OB_SUCC(ret) && static_cast<int32_t>(ObFileScanFormat::DESCRIBE) == table_def->format_) {
+      // the rows of the description are the columns of the file
+      const int64_t count = table_def->described_columns_.count();
+      if (OB_FAIL(spec.described_names_.prepare_allocate(count))
+          || OB_FAIL(spec.described_types_.prepare_allocate(count))
+          || OB_FAIL(spec.described_nullable_.prepare_allocate(count))) {
+      } else {
+        for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
+          const ObFileTableDef::Column &column = table_def->described_columns_.at(i);
+          if (OB_FAIL(copy_file_table_string(allocator, column.name_, spec.described_names_.at(i)))) {
+          } else {
+            spec.described_types_.at(i) = column.type_;
+            spec.described_nullable_.at(i) = column.nullable_ ? 1 : 0;
+          }
+        }
+      }
+    }
     if (OB_SUCC(ret)) {
       if (OB_FAIL(mark_expr_self_produced(op.get_output_exprs()))) {
       }

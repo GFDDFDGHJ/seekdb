@@ -226,6 +226,7 @@ public:
   int extract_file_table_bool(const ParseNode *node, bool &value);
   int extract_file_table_int(const ParseNode *node, int64_t &value);
   int resolve_file_table_def(ObFileTableDef &table_def, const ObFileScanOptions &options);
+  int build_file_table_describe_columns(ObFileTableDef &table_def);
   int resolve_file_table_glob(ObFileTableDef &table_def, const ObFileScanOptions &options);
   int resolve_file_table_file(ObFileTableDef &table_def, const ObFileScanOptions &options);
   int check_file_table_path(const common::ObString &path);

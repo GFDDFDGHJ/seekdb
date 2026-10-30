@@ -47,7 +47,10 @@ OB_SERIALIZE_MEMBER_INHERIT(ObFileTableAccessSpec,
                             escape_,
                             format_,
                             header_,
-                            file_list_);
+                            file_list_,
+                            described_names_,
+                            described_types_,
+                            described_nullable_);
 
 ObFileTableAccessOp::ObFileTableAccessOp(ObExecContext &exec_ctx, const ObOpSpec &spec, ObOpInput *input)
     : ObOperator(exec_ctx, spec, input),
@@ -57,6 +60,7 @@ ObFileTableAccessOp::ObFileTableAccessOp(ObExecContext &exec_ctx, const ObOpSpec
       file_size_(0),
       is_file_opened_(false),
       is_file_end_(false),
+      describe_row_index_(0),
       pending_row_index_(0),
       pending_row_count_(0),
       file_index_(0),
@@ -133,9 +137,12 @@ int ObFileTableAccessOp::inner_open()
   file_offset_ = 0;
   file_size_ = 0;
   is_file_end_ = false;
+  describe_row_index_ = 0;
   if (OB_FAIL(build_scan_options(options))) {
   } else if (MY_SPEC.output_.empty()) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (ObFileScanFormat::DESCRIBE == options.format_) {
+    // the description is written from the metadata, the file is not read
   } else if (ObFileScanFormat::GLOB == options.format_) {
     // the glob function returns the list of the files
   } else if (OB_FAIL(open_next_file())) {
@@ -261,6 +268,38 @@ int ObFileTableAccessOp::read_next_glob_record()
       memcpy(buffer, file.ptr(), file.length());
       datum->set_string(buffer, file.length());
       expr->set_evaluated_projected(eval_ctx_);
+    }
+  }
+  return ret;
+}
+
+/**
+ * @brief Describe one column of the file.
+ *
+ * Every row of the description holds the name, the type and whether the column
+ * takes null values; the other three columns of the DuckDB output are null.
+ */
+int ObFileTableAccessOp::read_next_describe_record()
+{
+  int ret = OB_SUCCESS;
+  const int64_t count = MY_SPEC.described_names_.count();
+  if (describe_row_index_ >= count) {
+    ret = OB_ITER_END;
+  } else {
+    const int64_t row = describe_row_index_++;
+    const common::ObString &name = MY_SPEC.described_names_.at(row);
+    const ObFileScanType type = static_cast<ObFileScanType>(MY_SPEC.described_types_.at(row));
+    common::ObString type_name(static_cast<int64_t>(strlen(ob_file_scan_type_name(type))),
+                               const_cast<char *>(ob_file_scan_type_name(type)));
+    common::ObString null_flag = (0 == MY_SPEC.described_nullable_.at(row))
+                                     ? common::ObString::make_string("NO")
+                                     : common::ObString::make_string("YES");
+    if (OB_FAIL(set_row_datum(0, name, false))) {
+    } else if (OB_FAIL(set_row_datum(1, type_name, false))) {
+    } else if (OB_FAIL(set_row_datum(2, null_flag, false))) {
+    } else if (OB_FAIL(set_null_datum(3))) {
+    } else if (OB_FAIL(set_null_datum(4))) {
+    } else if (OB_FAIL(set_null_datum(5))) {
     }
   }
   return ret;
@@ -395,6 +434,8 @@ int ObFileTableAccessOp::read_next_record()
   if (OB_FAIL(build_scan_options(options))) {
   } else if (ObFileScanFormat::GLOB == options.format_) {
     ret = read_next_glob_record();
+  } else if (ObFileScanFormat::DESCRIBE == options.format_) {
+    ret = read_next_describe_record();
   } else if (ObFileScanFormat::PARQUET == options.format_) {
     ret = read_next_parquet_record();
   } else if (pending_row_index_ < pending_row_count_) {
