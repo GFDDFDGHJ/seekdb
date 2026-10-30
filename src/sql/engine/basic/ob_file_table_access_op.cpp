@@ -271,17 +271,16 @@ int ObFileTableAccessOp::read_next_parquet_record()
   int ret = OB_SUCCESS;
   const std::vector<ObParquetRowGroupMeta> &row_groups = parquet_reader_.get_row_groups();
   const std::vector<ObParquetColumnMeta> &columns = parquet_reader_.get_columns();
-  if (row_group_index_ >= static_cast<int64_t>(row_groups.size())) {
-    ret = OB_ITER_END;
-  } else if (row_index_in_group_ >= row_count_in_group_) {
-    // read the values of the next row group
-    ++row_group_index_;
-    row_index_in_group_ = 0;
-    row_count_in_group_ = 0;
-    parquet_group_columns_.clear();
-    if (row_group_index_ < static_cast<int64_t>(row_groups.size())) {
+  while (OB_SUCC(ret)) {
+    if (row_group_index_ >= static_cast<int64_t>(row_groups.size())) {
+      ret = OB_ITER_END;
+      break;
+    }
+    if (parquet_group_columns_.empty()) {
+      // the values of a row group are read when the group is entered
       const ObParquetRowGroupMeta &row_group = row_groups[row_group_index_];
       row_count_in_group_ = row_group.num_rows_;
+      row_index_in_group_ = 0;
       for (size_t i = 0; OB_SUCC(ret) && i < columns.size(); ++i) {
         std::vector<ObParquetValue> values;
         if (OB_FAIL(parquet_reader_.read_column(row_group_index_, (int64_t)i, values))) {
@@ -289,14 +288,15 @@ int ObFileTableAccessOp::read_next_parquet_record()
         }
         parquet_group_columns_.push_back(values);
       }
-      if (OB_SUCC(ret) && row_index_in_group_ >= row_count_in_group_) {
-        ret = OB_ITER_END;
-      }
-    } else {
-      ret = OB_ITER_END;
     }
-  }
-  if (OB_SUCC(ret)) {
+    if (row_index_in_group_ >= row_count_in_group_) {
+      // the group is exhausted, the next one is read
+      ++row_group_index_;
+      row_index_in_group_ = 0;
+      row_count_in_group_ = 0;
+      parquet_group_columns_.clear();
+      continue;
+    }
     for (size_t i = 0; OB_SUCC(ret) && i < parquet_group_columns_.size(); ++i) {
       if (static_cast<int64_t>(i) >= row_count_in_group_
           || static_cast<int64_t>(i) >= static_cast<int64_t>(parquet_group_columns_[i].size())) {
@@ -306,6 +306,7 @@ int ObFileTableAccessOp::read_next_parquet_record()
       }
     }
     ++row_index_in_group_;
+    break;
   }
   return ret;
 }
