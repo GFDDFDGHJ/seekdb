@@ -66,6 +66,9 @@ public:
   inline const FileTablePath *get_file_path() const { return file_path_; }
 
 private:
+  int allocate_output_exprs();
+
+private:
   common::ObSEArray<ObRawExpr *, 4, common::ModulePageAllocator, true> column_exprs_;
   ObFileTableDef *table_def_;
   common::ObString table_name_;

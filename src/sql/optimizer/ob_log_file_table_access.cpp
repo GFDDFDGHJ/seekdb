@@ -95,6 +95,23 @@ int ObLogFileTableAccess::allocate_expr_post(ObAllocExprContext &ctx)
   }
   if (OB_SUCC(ret)) {
     if (OB_FAIL(ObLogicalOperator::allocate_expr_post(ctx))) {
+    } else if (get_output_exprs().empty() && OB_FAIL(allocate_output_exprs())) {
+    }
+  }
+  return ret;
+}
+
+/**
+ * @brief The columns of the file are the output of the operator.
+ *
+ * The operator is the root of the plan when the statement reads the file
+ * without a projection, the output of the operator is the columns of the file.
+ */
+int ObLogFileTableAccess::allocate_output_exprs()
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < column_exprs_.count(); ++i) {
+    if (OB_FAIL(output_exprs_.push_back(column_exprs_.at(i)))) {
     }
   }
   return ret;

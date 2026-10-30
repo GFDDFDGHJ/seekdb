@@ -1075,13 +1075,17 @@ int ObFileJsonReader::parse_object(int64_t begin, int64_t end, ObFileScanSink &s
   }
 
   // materialize the row
+  // A record does not hold every field of the schema, the fields that are
+  // missing are null.
   values_.clear();
-  for (size_t i = 0; i < value_off.size(); ++i) {
+  for (size_t i = 0; i < field_names_.size(); ++i) {
     common::ObString value;
-    if (0 == value_null[i]) {
+    const bool has_value = (i < value_off.size()) && (0 == value_null[i]);
+    if (has_value) {
       value.assign_ptr(scratch_.data() + value_off[i], value_len[i]);
     }
-    values_.push_back(ObFileScanValue(value, 0 != value_null[i], value_kind[i]));
+    const ObFileScanValueKind kind = (i < value_kind.size()) ? value_kind[i] : ObFileScanValueKind::TEXT;
+    values_.push_back(ObFileScanValue(value, !has_value, kind));
   }
   if (OB_FAIL(sink.on_row(values_.data(), values_.size()))) {
     return ret;

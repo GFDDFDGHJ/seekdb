@@ -53,6 +53,10 @@ ObFileTableAccessOp::ObFileTableAccessOp(ObExecContext &exec_ctx, const ObOpSpec
     : ObOperator(exec_ctx, spec, input),
       allocator_(&exec_ctx.get_allocator()),
       file_source_(NULL),
+      file_offset_(0),
+      file_size_(0),
+      is_file_opened_(false),
+      is_file_end_(false),
       pending_row_index_(0),
       pending_row_count_(0),
       file_index_(0),
@@ -68,6 +72,16 @@ ObFileTableAccessOp::~ObFileTableAccessOp() {}
 int ObFileTableAccessOp::on_row(const ObFileScanValue *values, int64_t count)
 {
   int ret = OB_SUCCESS;
+  // The strings of a record are only valid during the call, the reader reuses
+  // its buffers for the next record. The values are copied so that the rows
+  // that wait for the consumer stay valid.
+  for (int64_t i = 0; i < count; ++i) {
+    if (values[i].is_null_ || values[i].value_.empty()) {
+      pending_strings_.push_back(std::string());
+    } else {
+      pending_strings_.push_back(std::string(values[i].value_.ptr(), values[i].value_.length()));
+    }
+  }
   for (int64_t i = 0; i < count; ++i) {
     pending_values_.push_back(values[i]);
   }
@@ -108,9 +122,17 @@ int ObFileTableAccessOp::inner_open()
   pending_row_index_ = 0;
   pending_row_count_ = 0;
   pending_values_.clear();
+  pending_strings_.clear();
   pending_row_ends_.clear();
   is_eof_ = false;
   is_opened_ = true;
+  if (is_file_opened_) {
+    file_reader_.close();
+    is_file_opened_ = false;
+  }
+  file_offset_ = 0;
+  file_size_ = 0;
+  is_file_end_ = false;
   if (OB_FAIL(build_scan_options(options))) {
   } else if (MY_SPEC.output_.empty()) {
     ret = OB_ERR_UNEXPECTED;
@@ -164,9 +186,17 @@ int ObFileTableAccessOp::inner_rescan()
     pending_row_index_ = 0;
     pending_row_count_ = 0;
     pending_values_.clear();
+    pending_strings_.clear();
     pending_row_ends_.clear();
     parquet_group_columns_.clear();
     is_eof_ = false;
+    if (is_file_opened_) {
+      file_reader_.close();
+      is_file_opened_ = false;
+    }
+    file_offset_ = 0;
+    file_size_ = 0;
+    is_file_end_ = false;
   }
   return ret;
 }
@@ -183,9 +213,17 @@ int ObFileTableAccessOp::switch_iterator()
     pending_row_index_ = 0;
     pending_row_count_ = 0;
     pending_values_.clear();
+    pending_strings_.clear();
     pending_row_ends_.clear();
     parquet_group_columns_.clear();
     is_eof_ = false;
+    if (is_file_opened_) {
+      file_reader_.close();
+      is_file_opened_ = false;
+    }
+    file_offset_ = 0;
+    file_size_ = 0;
+    is_file_end_ = false;
   }
   return ret;
 }
@@ -283,12 +321,19 @@ int ObFileTableAccessOp::consume_pending_row()
     LOG_USER_ERROR(OB_ERR_UNEXPECTED, "the number of the columns of the file has changed");
   } else {
     for (int64_t i = 0; OB_SUCC(ret) && i < end - begin; ++i) {
-      ret = set_row_datum(i, pending_values_[begin + i].value_, pending_values_[begin + i].is_null_);
+      // the strings of the record are copied, the pointers are set again
+      ObFileScanValue &value = pending_values_[begin + i];
+      if (!value.is_null_ && !pending_strings_[begin + i].empty()) {
+        value.value_.assign_ptr(pending_strings_[begin + i].c_str(),
+                                pending_strings_[begin + i].length());
+      }
+      ret = set_row_datum(i, value.value_, value.is_null_);
     }
   }
   ++pending_row_index_;
   if (pending_row_index_ >= pending_row_count_) {
     pending_values_.clear();
+    pending_strings_.clear();
     pending_row_ends_.clear();
     pending_row_index_ = 0;
     pending_row_count_ = 0;
@@ -300,38 +345,43 @@ int ObFileTableAccessOp::read_file_chunk(ObFileScanReader &reader)
 {
   int ret = OB_SUCCESS;
   ObFileScanOptions options;
-  common::ObFileReader file_reader;
   char *buffer = NULL;
   if (OB_FAIL(build_scan_options(options))) {
-  } else if (OB_ISNULL(buffer = static_cast<char *>(allocator_->alloc(FILE_TABLE_READ_CHUNK_SIZE)))) {
+  } else if (!is_file_opened_) {
+    if (OB_FAIL(file_reader_.open(options.path_, false))) {
+      ret = OB_FILE_NOT_EXIST;
+      LOG_USER_ERROR(OB_FILE_NOT_EXIST, options.path_.ptr());
+    } else {
+      file_size_ = common::get_file_size(options.path_.ptr());
+      file_offset_ = 0;
+      is_file_end_ = (0 == file_size_);
+      is_file_opened_ = true;
+    }
+  }
+  if (OB_SUCC(ret) && OB_ISNULL(buffer = static_cast<char *>(allocator_->alloc(FILE_TABLE_READ_CHUNK_SIZE)))) {
     ret = OB_ALLOCATE_MEMORY_FAILED;
-  } else if (OB_FAIL(file_reader.open(options.path_, false))) {
-    ret = OB_FILE_NOT_EXIST;
-    LOG_USER_ERROR(OB_FILE_NOT_EXIST, options.path_.ptr());
-  } else {
-    const int64_t file_size = common::get_file_size(options.path_.ptr());
-    int64_t offset = 0;
-    bool is_end = false;
-    while (OB_SUCC(ret) && !is_end) {
-      int64_t read_size = 0;
-      const int64_t want = (file_size - offset) < FILE_TABLE_READ_CHUNK_SIZE ? (file_size - offset)
-                                                                       : FILE_TABLE_READ_CHUNK_SIZE;
-      if (OB_FAIL(file_reader.pread(buffer, want, offset, read_size))) {
-        ret = OB_IO_ERROR;
-        break;
-      }
-      if (read_size <= 0) {
-        break;
-      }
-      offset += read_size;
-      is_end = (offset >= file_size);
-      if (OB_FAIL(reader.feed(buffer, read_size, is_end, *this))) {
-        break;
-      }
-      if (pending_row_count_ > 0) {
-        // the records of the chunk are enough for the next rows
-        break;
-      }
+  }
+  while (OB_SUCC(ret) && !is_file_end_) {
+    int64_t read_size = 0;
+    const int64_t want = (file_size_ - file_offset_) < FILE_TABLE_READ_CHUNK_SIZE
+                             ? (file_size_ - file_offset_)
+                             : FILE_TABLE_READ_CHUNK_SIZE;
+    if (OB_FAIL(file_reader_.pread(buffer, want, file_offset_, read_size))) {
+      ret = OB_IO_ERROR;
+      break;
+    }
+    if (read_size <= 0) {
+      is_file_end_ = true;
+      break;
+    }
+    file_offset_ += read_size;
+    is_file_end_ = (file_offset_ >= file_size_);
+    if (OB_FAIL(reader.feed(buffer, read_size, is_file_end_, *this))) {
+      break;
+    }
+    if (pending_row_count_ > 0) {
+      // the records of the chunk are enough for the next rows
+      break;
     }
   }
   return ret;
@@ -400,6 +450,7 @@ int ObFileTableAccessOp::set_row_datum(int64_t index, const common::ObString &va
         int64_t int_value = 0;
         if (ob_file_scan_is_bool_text(value.ptr(), value.length())) {
           int_value = (0 == strncasecmp(value.ptr(), "true", 4)) ? 1 : 0;
+          datum->set_int(int_value);
         } else if (!ob_file_scan_try_parse_int64(value.ptr(), value.length(), int_value)) {
           ret = OB_ERR_UNEXPECTED;
           LOG_USER_ERROR(OB_ERR_UNEXPECTED, "the value of the file is not a number");
@@ -526,6 +577,7 @@ int ObFileTableAccessOp::inner_close()
   pending_row_index_ = 0;
   pending_row_count_ = 0;
   pending_values_.clear();
+  pending_strings_.clear();
   pending_row_ends_.clear();
   parquet_group_columns_.clear();
   is_eof_ = false;

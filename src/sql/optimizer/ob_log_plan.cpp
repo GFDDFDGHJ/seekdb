@@ -11826,16 +11826,13 @@ int ObLogPlan::do_alloc_file_table_path(FileTablePath *file_table_path,
     file_op->set_table_id(file_table_path->table_id_);
     file_op->set_file_table_def(table_def);
     file_op->set_file_path(file_table_path);
-    ObSEArray<ObColumnRefRawExpr *, 4> column_exprs;
-    if (OB_FAIL(get_stmt()->get_column_exprs(file_table_path->table_id_, column_exprs))) {
-    } else {
-      for (int64_t i = 0; OB_SUCC(ret) && i < column_exprs.count(); ++i) {
-        if (OB_FAIL(file_op->get_column_exprs().push_back(column_exprs.at(i)))) {
-        }
+    for (int64_t i = 0; OB_SUCC(ret) && i < table_def->column_exprs_.count(); ++i) {
+      ObColumnRefRawExpr *col_expr = static_cast<ObColumnRefRawExpr *>(table_def->column_exprs_.at(i));
+      if (OB_FAIL(file_op->get_column_exprs().push_back(col_expr))) {
       }
-      if (OB_SUCC(ret) && OB_FAIL(append(file_op->get_filter_exprs(), file_table_path->filter_))) {
-      } else if (OB_SUCC(ret) && OB_FAIL(file_op->compute_property(file_table_path))) {
-      }
+    }
+    if (OB_SUCC(ret) && OB_FAIL(append(file_op->get_filter_exprs(), file_table_path->filter_))) {
+    } else if (OB_SUCC(ret) && OB_FAIL(file_op->compute_property(file_table_path))) {
     }
   }
   return ret;

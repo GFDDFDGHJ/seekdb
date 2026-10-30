@@ -408,16 +408,39 @@ int ObDMLResolver::apply_file_table_option(const common::ObString &option_name,
 }
 
 /**
+ * @brief Find the constant node of a parse node.
+ *
+ * The plan cache turns the constants of a statement into parameters before the
+ * statement is resolved. The value of a string stays in the child of the node,
+ * the value of a number is kept in the parameter store.
+ */
+const ParseNode *ObDMLResolver::get_file_table_const_node(const ParseNode *node)
+{
+  const ParseNode *result = node;
+  if (!OB_ISNULL(node) && T_QUESTIONMARK == node->type_) {
+    result = NULL;
+    for (int64_t i = 0; OB_ISNULL(result) && i < node->num_child_; ++i) {
+      const ParseNode *child = node->children_[i];
+      if (!OB_ISNULL(child) && T_QUESTIONMARK != child->type_) {
+        result = child;
+      }
+    }
+  }
+  return result;
+}
+
+/**
  * @brief Extract a string value from a parse node.
  */
 int ObDMLResolver::extract_file_table_string(const ParseNode *node, common::ObString &value)
 {
   int ret = OB_SUCCESS;
-  if (OB_ISNULL(node) || (T_VARCHAR != node->type_ && T_CHAR != node->type_)) {
+  const ParseNode *literal = get_file_table_const_node(node);
+  if (OB_ISNULL(literal) || (T_VARCHAR != literal->type_ && T_CHAR != literal->type_)) {
     ret = OB_ERR_PARSE_SQL;
     LOG_USER_ERROR(OB_ERR_PARSE_SQL, ob_errpkt_strerror(OB_ERR_PARSER_SYNTAX), 0, "", 1);
   } else {
-    value.assign(const_cast<char *>(node->str_value_), node->str_len_);
+    value.assign(const_cast<char *>(literal->str_value_), literal->str_len_);
   }
   return ret;
 }
@@ -839,8 +862,21 @@ int ObDMLResolver::gen_file_table_column_items(TableItem &table_item)
       if (common::ObVarcharType == result_type.get_type()) {
         accuracy.set_precision(FILE_TABLE_VARCHAR_LENGTH);
         accuracy.set_scale(0);
+        // the text of the file uses the collation of the connection, the level
+        // of the collation is not set by the type of the column
+        common::ObCollationType coll_type = CS_TYPE_INVALID;
+        if (OB_FAIL(params_.session_info_->get_collation_connection(coll_type))) {
+        } else {
+          result_type.set_collation_type(coll_type);
+          result_type.set_collation_level(CS_LEVEL_IMPLICIT);
+        }
       } else {
         accuracy = common::ObAccuracy::DDL_DEFAULT_ACCURACY[result_type.get_type()];
+        result_type.set_collation_type(CS_TYPE_BINARY);
+        if (common::ObDateTimeType == result_type.get_type()) {
+          // the file holds the date time without the fractional seconds
+          accuracy.set_scale(0);
+        }
       }
       result_type.set_accuracy(accuracy);
       if (OB_FAIL(params_.expr_factory_->create_raw_expr(T_REF_COLUMN, column_expr))) {
@@ -858,6 +894,8 @@ int ObDMLResolver::gen_file_table_column_items(TableItem &table_item)
           column_item.column_id_ = column_expr->get_column_id();
           column_item.column_name_ = column_expr->get_column_name();
           ret = stmt->add_column_item(column_item);
+          if (OB_SUCC(ret) && OB_FAIL(table_item.file_table_def_->column_exprs_.push_back(column_expr))) {
+          }
         }
       }
     }

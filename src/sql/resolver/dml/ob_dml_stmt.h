@@ -159,6 +159,8 @@ struct ObFileTableDef
   bool header_;         // the first record of a csv file holds the column names
   int64_t sample_size_; // only -1, the whole file is inspected
   common::ObArray<Column, common::ModulePageAllocator, true> columns_;
+  // the expressions of the columns, they are the output of the operator
+  common::ObArray<ObRawExpr *, common::ModulePageAllocator, true> column_exprs_;
   // the files that were found by the glob function
   common::ObArray<common::ObString, common::ModulePageAllocator, true> files_;
   int64_t row_count_;

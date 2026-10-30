@@ -110,8 +110,17 @@ private:
   ObFileJsonReader json_reader_;
   ObFileParquetReader parquet_reader_;
   ObFileTableFileSource *file_source_;
+  // the reader of the file, the file is read once and the records are consumed
+  // one after the other
+  common::ObFileReader file_reader_;
+  int64_t file_offset_;
+  int64_t file_size_;
+  bool is_file_opened_;
+  bool is_file_end_;
   // the records that were read but not used yet
   std::vector<ObFileScanValue> pending_values_;
+  // the strings of the records that wait for the consumer
+  std::vector<std::string> pending_strings_;
   std::vector<int64_t> pending_row_ends_;
   int64_t pending_row_index_;
   int64_t pending_row_count_;

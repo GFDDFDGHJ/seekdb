@@ -221,6 +221,7 @@ public:
   int apply_file_table_option(const common::ObString &option_name,
                               const ParseNode *value_node,
                               ObFileScanOptions &options);
+  const ParseNode *get_file_table_const_node(const ParseNode *node);
   int extract_file_table_string(const ParseNode *node, common::ObString &value);
   int extract_file_table_bool(const ParseNode *node, bool &value);
   int extract_file_table_int(const ParseNode *node, int64_t &value);

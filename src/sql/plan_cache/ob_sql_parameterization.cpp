@@ -2108,6 +2108,11 @@ int ObSqlParameterization::mark_tree(ParseNode *tree ,SqlInfo &sql_info)
       if (OB_FAIL(mark_args(tree, mark_arr, ARGS_NUMBER_FIVE, sql_info))) {
       }
     }
+  } else if (T_FILE_TABLE_EXPRESSION == tree->type_) {
+    // The arguments of a file table function describe the file that is read, they
+    // are part of the plan of the statement and must not become parameters.
+    tree->is_tree_not_param_ = true;
+    sql_info.ps_need_parameterized_ = false;
   } else if (T_FUN_SYS_TREAT == tree->type_) {
     if (2 != tree->num_child_) {
       ret = OB_INVALID_ARGUMENT;
