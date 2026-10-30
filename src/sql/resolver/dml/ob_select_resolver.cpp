@@ -2986,6 +2986,81 @@ int ObSelectResolver::resolve_into_file_node(const ParseNode *list_node, ObSelec
   return ret;
 }
 
+/**
+ * @brief Resolve the INTO clause of a COPY statement.
+ *
+ * The clause is the INTO OUTFILE clause of the query, the options of the COPY
+ * statement are the comma separated options of the csv file.
+ */
+int ObSelectResolver::resolve_copy_into(const ParseNode *node, ObSelectIntoItem &into_item)
+{
+  int ret = OB_SUCCESS;
+  const ParseNode *options_node = NULL;
+  if (OB_ISNULL(node) || T_COPY_INTO != node->type_ || 2 != node->num_child_) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(resolve_into_const_node(node->children_[0], into_item.outfile_name_))) {
+  } else {
+    // the values of the csv file are separated by a comma
+    ObObj field_str;
+    field_str.set_varchar(ObString::make_string(","));
+    field_str.set_collation_type(ObCharset::get_system_collation());
+    into_item.field_str_ = field_str;
+    if (NULL != (options_node = node->children_[1])) {
+      for (int64_t i = 0; OB_SUCC(ret) && i < options_node->num_child_; ++i) {
+        if (OB_FAIL(resolve_copy_option(options_node->children_[i], into_item))) {
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+/**
+ * @brief Resolve one option of a COPY statement.
+ */
+int ObSelectResolver::resolve_copy_option(const ParseNode *node, ObSelectIntoItem &into_item)
+{
+  int ret = OB_SUCCESS;
+  const ParseNode *name_node = NULL;
+  const ParseNode *value_node = NULL;
+  common::ObString name;
+  common::ObString value;
+  if (OB_ISNULL(node) || T_COPY_OPTION != node->type_ || 2 != node->num_child_) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_ISNULL(name_node = node->children_[0]) || OB_ISNULL(name_node->str_value_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    name.assign_ptr(const_cast<char *>(name_node->str_value_), static_cast<int32_t>(name_node->str_len_));
+    if (NULL != (value_node = node->children_[1]) && NULL != value_node->str_value_) {
+      value.assign_ptr(const_cast<char *>(value_node->str_value_), static_cast<int32_t>(value_node->str_len_));
+    }
+    if (0 == name.case_compare("format")) {
+      if (value.empty() || 0 != value.case_compare("csv")) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "only the csv format of the COPY statement");
+      }
+    } else if (0 == name.case_compare("header")) {
+      into_item.is_write_header_ = true;
+    } else if (0 == name.case_compare("nullstr")) {
+      if (OB_FAIL(ob_write_string(*allocator_, value, into_item.null_str_))) {
+      }
+    } else if (0 == name.case_compare("delimiter")) {
+      common::ObString delimiter;
+      ObObj field_str;
+      if (OB_FAIL(ob_write_string(*allocator_, value, delimiter))) {
+      } else {
+        field_str.set_varchar(delimiter);
+        field_str.set_collation_type(ObCharset::get_system_collation());
+        into_item.field_str_ = field_str;
+      }
+    } else {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, name.ptr());
+    }
+  }
+  return ret;
+}
+
 int ObSelectResolver::resolve_into_outfile_with_format(const ParseNode *node, ObSelectIntoItem &into_item)
 {
   int ret = OB_SUCCESS;
@@ -3103,8 +3178,14 @@ int ObSelectResolver::resolve_into_clause(const ParseNode *node)
       ret = OB_ERR_VIEW_SELECT_CONTAIN_INTO;
     } else {
       new(into_item) ObSelectIntoItem();
-      into_item->into_type_ = node->type_;
-      if (T_INTO_OUTFILE == node->type_) { // into outfile
+      into_item->into_type_ = (T_COPY_INTO == node->type_) ? T_INTO_OUTFILE : node->type_;
+      if (T_COPY_INTO == node->type_) {
+        // the COPY statement writes a csv file
+        if (is_in_set_query()) {
+          ret = OB_INAPPROPRIATE_INTO;
+        } else if (OB_FAIL(resolve_copy_into(node, *into_item))) {
+        }
+      } else if (T_INTO_OUTFILE == node->type_) { // into outfile
         if (is_in_set_query()) {
           ret = OB_INAPPROPRIATE_INTO;
         } else if (node->num_child_ == 3 && NULL != node->children_[1]

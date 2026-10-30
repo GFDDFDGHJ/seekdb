@@ -71,7 +71,10 @@ public:
       parallel_(1),
       buffer_size_(DEFAULT_BUFFER_SIZE),
       is_overwrite_(false),
-      external_properties_(alloc)
+      external_properties_(alloc),
+      is_write_header_(false),
+      null_str_(),
+      column_names_(alloc)
   {
   }
 
@@ -91,6 +94,12 @@ public:
   int64_t buffer_size_;
   bool is_overwrite_;
   ObExternalFileFormat::StringData external_properties_;
+  // the COPY statement writes the names of the columns first
+  bool is_write_header_;
+  // the text of the null values of a COPY statement
+  common::ObString null_str_;
+  // the names of the columns of the COPY statement
+  common::ObFixedArray<common::ObString, common::ObIAllocator> column_names_;
   static const int64_t DEFAULT_MAX_FILE_SIZE = 256LL * 1024 * 1024;
   static const int64_t DEFAULT_BUFFER_SIZE = 1LL * 1024 * 1024;
 };
@@ -123,6 +132,7 @@ public:
       shared_buf_len_(0),
       use_shared_buf_(false),
       has_compress_(false),
+      header_written_(false),
       external_properties_(),
       format_type_(ObExternalFileFormat::FormatType::CSV_FORMAT),
       block_id_(0),
@@ -211,6 +221,7 @@ private:
                          ObString &str,
                          ObCollationType coll_type);
   int print_field(const ObObj &obj, ObCsvFileWriter &data_writer);
+  int write_column_names(ObExternalFileWriter *data_writer);
   int print_lob_field(const ObObj &obj,
                       const ObExpr &expr,
                       const ObDatum &datum,
@@ -288,6 +299,8 @@ private:
   int64_t shared_buf_len_;
   bool use_shared_buf_;
   bool has_compress_;
+  // the names of the columns of a COPY statement are written once
+  bool header_written_;
   ObExternalFileFormat external_properties_;
   ObExternalFileFormat::FormatType format_type_;
   uint32_t block_id_;

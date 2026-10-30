@@ -501,6 +501,7 @@ END_P SET_VAR DELIMITER
 %type <node> vec_index_params vec_index_param vec_index_param_value opt_with_vector_index_parameters
 %type <node> json_table_expr unnest_expr mock_jt_on_error_on_empty jt_column_list json_table_column_def
 %type <node> file_table_func_expr file_table_func_name file_table_func_args file_table_func_arg
+%type <node> copy_stmt copy_option_list copy_option copy_option_value
 %type <node> json_table_ordinality_column_def json_table_exists_column_def json_table_value_column_def json_table_nested_column_def
 %type <node> opt_value_on_empty_or_error_or_mismatch opt_on_mismatch
 %type <node> table_values_clause table_values_clause_with_order_by_and_limit values_row_list row_value
@@ -559,6 +560,7 @@ opt_end_p:
 /* only preparable statement will set question mark size */
 stmt:
     select_stmt             { $$ = $1; question_mark_issue($$, result); }
+  | copy_stmt               { $$ = $1; question_mark_issue($$, result); }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
     $$ = $1;
@@ -16697,6 +16699,66 @@ file_table_func_arg
 
 file_table_func_arg:
 expr
+{
+  $$ = $1;
+}
+;
+
+/*
+ * COPY ( query ) TO 'path' ( options ) writes the rows of a query into a local
+ * file. The clause is resolved as the INTO OUTFILE clause of the query.
+ */
+copy_stmt:
+COPY '(' select_stmt ')' TO STRING_VALUE '(' copy_option_list ')'
+{
+  ParseNode *into_node = NULL;
+  if (OB_UNLIKELY(NULL == $3 || T_SELECT != $3->type_)) {
+    yyerror(&@1, result, "the COPY statement needs a query\n");
+    YYABORT_PARSE_SQL_ERROR;
+  } else {
+    malloc_non_terminal_node(into_node, result->malloc_pool_, T_COPY_INTO, 2, $6, $8);
+    $3->children_[PARSE_SELECT_INTO] = into_node;
+    $$ = $3;
+  }
+}
+;
+
+copy_option_list:
+copy_option
+{
+  malloc_list_node($$, result->malloc_pool_, T_EXPR_LIST, 4, 1, $1);
+}
+| copy_option_list ',' copy_option
+{
+  push_back_list(result->malloc_pool_, result, $$, $1, $3);
+}
+;
+
+copy_option:
+FORMAT opt_equal_mark copy_option_value
+{
+  (void)($2);
+  ParseNode *name_node = NULL;
+  get_non_reserved_node(name_node, result->malloc_pool_, @1.first_column, @1.last_column);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_OPTION, 2, name_node, $3);
+}
+| NAME_OB opt_equal_mark copy_option_value
+{
+  (void)($2);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_OPTION, 2, $1, $3);
+}
+| NAME_OB
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_COPY_OPTION, 2, $1, NULL);
+}
+;
+
+copy_option_value:
+NAME_OB
+{
+  $$ = $1;
+}
+| STRING_VALUE
 {
   $$ = $1;
 }

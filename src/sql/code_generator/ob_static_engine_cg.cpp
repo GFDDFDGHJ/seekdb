@@ -5591,7 +5591,26 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
       spec.cs_type_ = op.get_cs_type();
       spec.parallel_ = op.get_parallel();
       spec.is_overwrite_ = op.get_is_overwrite();
+      spec.is_write_header_ = op.get_is_write_header();
       spec.plan_->need_drive_dml_query_ = true;
+      if (OB_FAIL(ob_write_string(alloc, op.get_null_str(), spec.null_str_))) {
+      } else if (OB_SUCC(ret) && spec.is_write_header_) {
+        // the names of the columns of the query are the first row of the file
+        const ObSelectStmt *select_stmt = NULL;
+        if (OB_ISNULL(select_stmt = static_cast<const ObSelectStmt *>(op.get_stmt())) ||
+            OB_UNLIKELY(select_stmt->get_select_item_size() != spec.select_exprs_.count())) {
+          ret = OB_ERR_UNEXPECTED;
+          LOG_WARN("the select items of the copy statement", K(ret));
+        } else if (OB_FAIL(spec.column_names_.init(select_stmt->get_select_item_size()))) {
+        } else {
+          for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_select_item_size(); ++i) {
+            ObString name;
+            if (OB_FAIL(ob_write_string(alloc, select_stmt->get_select_item(i).alias_name_, name))) {
+            } else if (OB_FAIL(spec.column_names_.push_back(name))) {
+            }
+          }
+        }
+      }
     }
   }
   return ret;
